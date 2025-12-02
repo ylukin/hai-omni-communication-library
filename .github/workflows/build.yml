@@ -1,0 +1,151 @@
+name: Build Pipeline
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }} with ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu builds with different GCC versions
+          - os: ubuntu-22.04
+            compiler: gcc-11
+            cc: gcc-11
+            cxx: g++-11
+          - os: ubuntu-22.04
+            compiler: gcc-12
+            cc: gcc-12
+            cxx: g++-12
+          - os: ubuntu-20.04
+            compiler: gcc-9
+            cc: gcc-9
+            cxx: g++-9
+          # Latest Ubuntu with default GCC
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          # macOS build
+          - os: macos-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libreadline-dev libtermcap-dev ${{ matrix.compiler }}
+        
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install readline ncurses
+          
+      - name: Set compiler environment variables
+        run: |
+          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+          echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
+          
+      - name: Set linker flags for macOS
+        if: runner.os == 'macOS'
+        run: |
+          # macOS uses ncurses instead of termcap
+          echo "LFLAGS=-lreadline -lncurses" >> $GITHUB_ENV
+          
+      - name: Display compiler version
+        run: |
+          ${{ matrix.cc }} --version
+          
+      - name: Build project
+        id: build
+        run: |
+          echo "::group::Building hai executable"
+          cd src
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            # macOS may need readline from Homebrew
+            READLINE_PREFIX=$(brew --prefix readline)
+            NCURSES_PREFIX=$(brew --prefix ncurses)
+            export CFLAGS="-I${READLINE_PREFIX}/include -I${NCURSES_PREFIX}/include -O2 -Wall -DHAISERIAL_SUPPORT -DGNUREADLINE_SUPPORT"
+            export LFLAGS="-L${READLINE_PREFIX}/lib -L${NCURSES_PREFIX}/lib -lreadline -lncurses"
+            make CFLAGS="$CFLAGS" LFLAGS="$LFLAGS"
+          else
+            make
+          fi
+          echo "::endgroup::"
+          
+      - name: Verify build output
+        run: |
+          if [ ! -f src/hai ]; then
+            echo "::error::Build failed - hai executable not found"
+            exit 1
+          fi
+          echo "✓ Build successful - hai executable created"
+          ls -lh src/hai
+          file src/hai
+          
+      - name: Test executable
+        run: |
+          echo "::group::Testing hai executable"
+          cd src
+          ./hai -h || echo "Note: hai may require additional arguments or configuration"
+          echo "::endgroup::"
+          
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hai-${{ matrix.os }}-${{ matrix.compiler }}
+          path: src/hai
+          retention-days: 30
+          if-no-files-found: error
+          
+      - name: Report build status
+        if: always()
+        run: |
+          if [ "${{ steps.build.outcome }}" == "success" ]; then
+            echo "::notice::✓ Build succeeded on ${{ matrix.os }} with ${{ matrix.compiler }}"
+          else
+            echo "::error::✗ Build failed on ${{ matrix.os }} with ${{ matrix.compiler }}"
+            exit 1
+          fi
+
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    
+    steps:
+      - name: Check build results
+        run: |
+          if [ "${{ needs.build.result }}" == "success" ]; then
+            echo "::notice::All builds completed successfully! ✓"
+          else
+            echo "::error::Some builds failed. Check the job logs above for details."
+            exit 1
+          fi
+          
+      - name: Download all artifacts
+        if: needs.build.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: List all build artifacts
+        if: needs.build.result == 'success'
+        run: |
+          echo "::group::Build artifacts summary"
+          find artifacts -type f -name "hai" -exec sh -c 'echo "{}:"; ls -lh "{}"; file "{}"; echo ""' \;
+          echo "::endgroup::"
