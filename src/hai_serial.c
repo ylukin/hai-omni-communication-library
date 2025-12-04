@@ -97,8 +97,11 @@ HAIEXPORT int hai_serial_open(hai_comm_id *id, const char *dev, int baud)
     options.c_cflag |= (CLOCAL | CREAD);
     options.c_cflag &= ~CRTSCTS;
     options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-    options.c_iflag &= ~(IXON | IXOFF | IXANY | BRKINT | IMAXBEL | IUCLC | ICRNL
-     | INLCR);
+    options.c_iflag &= ~(IXON | IXOFF | IXANY | BRKINT | IMAXBEL
+#ifdef IUCLC
+     | IUCLC
+#endif
+     | ICRNL | INLCR);
     options.c_iflag |= IGNPAR | IGNBRK;
     options.c_oflag &= ~OPOST;
     options.c_cc[VINTR]    = 0;     /* Ctrl-c */
@@ -108,7 +111,9 @@ HAIEXPORT int hai_serial_open(hai_comm_id *id, const char *dev, int baud)
     options.c_cc[VEOF]     = 0;     /* Ctrl-d */
     options.c_cc[VTIME]    = 0;     /* inter-character timer unused */
     options.c_cc[VMIN]     = 1;     /* blocking read until 1 character arrives */
+#ifdef VSWTC
     options.c_cc[VSWTC]    = 0;     /* '\0' */
+#endif
     options.c_cc[VSTART]   = 0;     /* Ctrl-q */
     options.c_cc[VSTOP]    = 0;     /* Ctrl-s */
     options.c_cc[VSUSP]    = 0;     /* Ctrl-z */
@@ -128,10 +133,10 @@ HAIEXPORT int hai_serial_open(hai_comm_id *id, const char *dev, int baud)
 /* Function to close serial connection */
 HAIEXPORT int hai_serial_close(const hai_comm_id *id)
 {
-	/* Check file handle */
-	if (id->s == 0)
-		return EHAISESSION;
-	
+        /* Check file handle */
+        if (id->s == 0)
+                return EHAISESSION;
+        
     /* Close serial port */
     close (id->s);
 
@@ -145,9 +150,9 @@ HAIEXPORT int hai_serial_send_msg(const hai_comm_id *id, const void *msg, int le
 {
     int cnt;
 
-	/* Check file handle */
-	if (id->s == 0)
-		return EHAISESSION;
+        /* Check file handle */
+        if (id->s == 0)
+                return EHAISESSION;
 
     /* Write data */
     if ((cnt = write(id->s, msg, len)) < 0)
@@ -165,9 +170,9 @@ HAIEXPORT int hai_serial_recv_msg(const hai_comm_id *id, void *msg, int *len)
     struct timeval tv;
     fd_set rfds;
 
-	/* Check file handle */
-	if (id->s == 0)
-		return EHAISESSION;
+        /* Check file handle */
+        if (id->s == 0)
+                return EHAISESSION;
 
     /* Prepare read */
     needed = *len;
